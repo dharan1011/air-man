@@ -1,6 +1,6 @@
 'use strict';
 
-const {dialogflow, Permission} = require('actions-on-google');
+const {dialogflow, Permission, Suggestions} = require('actions-on-google');
 const functions = require('firebase-functions');
 const axios = require('axios').default;
 const client = axios.create({
@@ -15,6 +15,7 @@ app.intent('Default Welcome Intent', (conv) => {
     let context = 'I need permission to address you by name';
     if(conv.user.verification === 'VERIFIED'){
         // Could use DEVICE_PRECISE_LOCATION instead for coordinates and street address
+        permissions.push('DEVICE_COARSE_LOCATION');
         permissions.push('DEVICE_PRECISE_LOCATION');
         context += '  and know your location.';
     }
@@ -24,25 +25,48 @@ app.intent('Default Welcome Intent', (conv) => {
     }));
 });
 
-app.intent('actions_intent_PERMISSION',async (conv, params, permissionsGranted) => {
+app.intent('actions_intent_PERMISSION', (conv, params, permissionsGranted) => {
     const {display} = conv.user.name;
-    const {formattedAddress} = conv.device.location;
-    const {latitude,longitude} = conv.device.location.coordinates;
 
-    if(formattedAddress && display){
-        conv.ask(`Okay ${display}. You are located at ${formattedAddress}. Wait while we Fetching AQI.`);
-
-        try {
-            const reponse = await client.get(`/feed/geo:${latitude};${longitude}/?token=${TOKEN}`);
-            conv.close(`AQI at ${formattedAddress} is ${reponse.data.data.aqi}`)
-        } catch (error) {
-            conv.close('Something went wrong in fetching data.')
-        }
+    if(permissionsGranted && display){
+        conv.ask(`Okay ${display}. Thank you for letting me know you location.`);
+        conv.ask(new Suggestions(`Tell about Air Quality`));
     }else {
-        conv.ask('Looks like i dont have permission to get enough information to get work done');
+        conv.close('Looks like i dont have permission to get enough information to get work done');
     }
     
 });
 
+app.intent('air quality index', async (conv, {'geo-city' : city}) => {
+
+    conv.ask('While we fetch breathe some air.');
+    if(city){
+        await getAirQualityCity(city, conv);
+    }else{
+        const {latitude,longitude} = conv.device.location.coordinates;
+
+        await getAirQualityLatLang(latitude,longitude,conv);
+    }
+})
+
 
 exports.dialogflowFirebaseFulfillment = functions.https.onRequest(app);
+
+async function getAirQualityLatLang(latitude, longitude, conv) {
+    try {
+        const reponse = await client.get(`/feed/geo:${latitude};${longitude}/?token=${TOKEN}`);
+        conv.close(`AQI in your area is ${reponse.data.data.aqi}`);
+    }
+    catch (error) {
+        conv.close('Something went wrong in fetching data.');
+    }
+}
+async function getAirQualityCity(city, conv) {
+    try {
+        const reponse = await client.get(`/feed/${city}/?token=${TOKEN}`);
+        conv.close(`Air Quality in ${city} is ${reponse.data.data.aqi}`);
+    }
+    catch (error) {
+        conv.close('Something went wrong in fetching data.');
+    }
+}
